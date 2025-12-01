@@ -3,7 +3,10 @@ from fastapi.responses import HTMLResponse
 from app.routers.optionchain import router as optionchain_router
 from app.routers.health import router as health_router
 
-app = FastAPI(title="TrueData OptionChain + Greeks API")
+app = FastAPI(
+    title="TrueData OptionChain + Greeks API",
+    openapi_version="3.1.0",
+)
 
 app.include_router(optionchain_router)
 app.include_router(health_router)

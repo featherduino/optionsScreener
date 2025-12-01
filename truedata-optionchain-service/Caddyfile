@@ -1,3 +1,5 @@
+admin off
+
 :{$PORT} {
     route /api* {
         uri strip_prefix /api
