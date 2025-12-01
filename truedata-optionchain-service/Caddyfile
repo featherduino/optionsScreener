@@ -1,0 +1,10 @@
+:{$PORT} {
+    route /api* {
+        uri strip_prefix /api
+        reverse_proxy localhost:8000
+    }
+    route /health* {
+        reverse_proxy localhost:8000
+    }
+    reverse_proxy localhost:8501
+}
