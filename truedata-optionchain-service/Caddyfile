@@ -1,4 +1,6 @@
-admin off
+{
+    admin off
+}
 
 :{$PORT} {
     route /api* {
