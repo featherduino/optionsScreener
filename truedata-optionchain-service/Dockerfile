@@ -22,5 +22,5 @@ COPY . /app
 # Expose backend port (for local clarity; platform may override)
 EXPOSE 8000
 
-# Backend-only start command (no proxy/streamlit)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Backend-only start command (no proxy/streamlit). Respect platform-provided PORT.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
