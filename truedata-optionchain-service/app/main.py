@@ -1,11 +1,21 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from app.config import ALLOW_ORIGINS
 from app.routers.optionchain import router as optionchain_router
 from app.routers.health import router as health_router
 
 app = FastAPI(
     title="TrueData OptionChain + Greeks API",
     openapi_version="3.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOW_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(optionchain_router)

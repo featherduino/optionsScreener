@@ -9,9 +9,12 @@ from streamlit_autorefresh import st_autorefresh
 API_BASE = os.getenv("OPTIONCHAIN_API", "http://localhost:8000")
 
 
-def fetch_optionchain(symbol: str):
+def fetch_optionchain(symbol: str, expiry: str | None = None):
     url = f"{API_BASE}/optionchain/{symbol}"
-    resp = requests.get(url, timeout=15)
+    params = {}
+    if expiry:
+        params["expiry"] = expiry
+    resp = requests.get(url, params=params, timeout=15)
     resp.raise_for_status()
     return resp.json()
 
@@ -157,13 +160,45 @@ def main():
     st_autorefresh(interval=refresh_sec * 1000, key="auto_refresh_key", limit=None)
 
     symbol = st.text_input("Symbol", value="RELIANCE").strip().upper()
+    expiry_input = st.text_input("Expiry (optional, e.g., 30-12-2025)", value="").strip()
     if not symbol:
         st.stop()
 
     try:
-        data = fetch_optionchain(symbol)
+        data = fetch_optionchain(symbol, expiry_input or None)
     except Exception as e:
         st.error(f"Failed to fetch data: {e}")
+        st.stop()
+
+    if data.get("error"):
+        st.error(f"Backend error: {data.get('error')}")
+        hints = []
+        if data.get("expiry_error"):
+            hints.append(f"Expiry lookup failed: {data['expiry_error']}")
+        if data.get("chain_error"):
+            hints.append(f"Option chain fetch failed: {data['chain_error']}")
+        if not hints:
+            hints.append("Verify TRUEDATA credentials/tokens and API host configuration.")
+        for h in hints:
+            st.info(h)
+        if data.get("expiry_candidates"):
+            st.write("Expiry candidates returned:", data["expiry_candidates"])
+        if data.get("requested_expiry"):
+            st.write("Requested expiry:", data["requested_expiry"])
+        st.stop()
+
+    if data.get("total_rows", 0) == 0:
+        st.warning("No option chain rows returned. Check that your TrueData credentials are valid and the symbol has an active expiry.")
+        st.info(f"Expiry used: {data.get('expiry')}")
+        err = data.get("chain_error")
+        resp = data.get("chain_response")
+        if err or resp:
+            with st.expander("Debug details from backend"):
+                if err:
+                    st.write("Chain error:", err)
+                if resp:
+                    snippet = resp if len(resp) < 800 else (resp[:800] + " …")
+                    st.code(snippet or "(empty response)", language="text")
         st.stop()
 
     st.write(f"Expiry: {data.get('expiry')}")

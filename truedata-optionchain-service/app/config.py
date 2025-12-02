@@ -15,3 +15,7 @@ TD_OPTION_CHAIN_URL = os.getenv("TRUEDATA_OPTION_CHAIN_URL")  # optional overrid
 
 CACHE_ENABLED = os.getenv("CACHE_ENABLED", "false").lower() == "true"
 REDIS_URL = os.getenv("REDIS_URL")
+
+# CORS configuration
+_raw_origins = os.getenv("ALLOW_ORIGIN", "*")
+ALLOW_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]

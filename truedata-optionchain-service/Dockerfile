@@ -1,15 +1,21 @@
-FROM python:3.10
+FROM python:3.10-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY . .
+# Install build deps only if needed by requirements
+RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends caddy && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip install --no-cache-dir -r requirements.txt && \
-    chmod +x /app/start.sh
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-ENV PORT=10000
+COPY . /app
 
-CMD ["./start.sh"]
+# Expose backend port (for local clarity; platform may override)
+EXPOSE 8000
+
+# Backend-only start command (no proxy/streamlit)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -13,6 +13,17 @@ from app.utils.cache import r
 
 router = APIRouter(prefix="/optionchain", tags=["optionchain"])
 
+# Normalize expiry inputs for the API (accepts several formats, outputs dd-mm-YYYY).
+def normalize_expiry(expiry: str | None) -> str | None:
+    if not expiry:
+        return None
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(expiry, fmt).strftime("%d-%m-%Y")
+        except Exception:
+            continue
+    return expiry
+
 # --- Helper: Clean all NaN / inf values recursively ---
 def clean_json_safe(obj):
     if isinstance(obj, float):
@@ -32,27 +43,32 @@ def clean_json_safe(obj):
 
 
 @router.get("/{symbol}")
-def get_option_chain(symbol: str):
+def get_option_chain(symbol: str, expiry: str | None = None):
     symbol = symbol.upper()
 
-    # 1️⃣ Get nearest expiry
-    expiries = get_expiries(symbol)
-    expiry = pick_nearest_expiry(expiries)
+    # 1️⃣ Use requested expiry (if provided), else pick nearest available
+    chosen_expiry = normalize_expiry(expiry)
+    expiries = []
+    if not chosen_expiry:
+        expiries = get_expiries(symbol)
+        chosen_expiry = normalize_expiry(pick_nearest_expiry(expiries))
 
-    if not expiry:
+    if not chosen_expiry:
         return {
             "error": "No valid expiry",
             "symbol": symbol,
+            "requested_expiry": expiry,
             "expiry_response": getattr(td_client, "last_expiry_response", None),
             "expiry_error": getattr(td_client, "last_expiry_error", None),
+            "expiry_candidates": expiries,
         }
 
     # 2️⃣ Fetch option chain
-    df = fetch_chain(symbol, expiry)
+    df = fetch_chain(symbol, chosen_expiry)
     if df.empty:
         return {
             "symbol": symbol,
-            "expiry": expiry,
+            "expiry": chosen_expiry,
             "total_rows": 0,
             "top_strikes": [],
             "chain_response": getattr(td_client, "last_chain_response", None),
@@ -71,7 +87,7 @@ def get_option_chain(symbol: str):
     # 5️⃣ Build payload and clean recursively
     payload = {
         "symbol": symbol,
-        "expiry": expiry,
+        "expiry": chosen_expiry,
         "total_rows": len(df),
         "top_strikes": important.to_dict(orient="records"),
         "charts": charts,

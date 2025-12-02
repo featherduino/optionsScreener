@@ -1,5 +1,6 @@
 from io import StringIO
 from datetime import datetime
+import os
 import time
 import requests
 import pandas as pd
@@ -41,9 +42,13 @@ class TDRESTClient:
         self.last_chain_response = None
         self.last_chain_error = None
         self._access_token = token
-        self._token_expiry_ts = 0.0
+        self._token_expiry_ts = 0.0  # when to refresh/rotate the token
         self._token_last_refresh_ts = 0.0
         self._token_source = "static" if token else None
+        # Testing aid: force a short TTL for faster refresh cycles during local testing.
+        self._force_ttl_seconds = float(os.getenv("TD_FORCE_TOKEN_TTL_SECONDS", "0") or 0)
+        # Attempt to initialize a token immediately if possible.
+        self._ensure_token()
 
     def _fetch_token(self):
         if not (self.username and self.password):
@@ -59,38 +64,48 @@ class TDRESTClient:
             resp.raise_for_status()
             payload = resp.json()
             token = payload.get("access_token")
-            ttl = float(payload.get("expires_in", 0)) or 0.0
             if token:
                 self._access_token = token
-                # Buffer 60s before expiry
-                self._token_expiry_ts = time.time() + max(ttl - 60, 60)
+                ttl = float(payload.get("expires_in", 0)) or 43200  # default to 12h if missing
+                if self._force_ttl_seconds > 0:
+                    ttl = self._force_ttl_seconds
+                now = time.time()
+                # Refresh a bit early (min 60s, max 300s or 10% of TTL) to avoid expiry races.
+                buffer = max(min(ttl * 0.1, 300), 60)
+                self._token_expiry_ts = now + max(ttl - buffer, 300)
+                self._token_last_refresh_ts = now
         except Exception:
             # Leave existing token in place; caller will handle failure
             pass
         else:
             if token:
                 self._token_source = "login"
-                self._token_last_refresh_ts = time.time()
 
     def _ensure_token(self):
         now = time.time()
-        if self._access_token and now < self._token_expiry_ts:
+        # If we have a token and it is still valid (or unknown expiry), keep it.
+        if self._access_token and (self._token_expiry_ts == 0.0 or now < self._token_expiry_ts):
             return
-        if not self._access_token and self.static_token:
-            # Use static token initially
+
+        # If we have credentials, try to refresh/rotate.
+        if self.username and self.password:
+            self._fetch_token()
+            if self._access_token:
+                return
+
+        # Fall back to the provided static token if nothing else worked.
+        if self.static_token:
             self._access_token = self.static_token
-            self._token_expiry_ts = now + 3600
             self._token_source = "static"
-            return
-        self._fetch_token()
+            self._token_expiry_ts = 0.0
 
     def _headers(self):
         self._ensure_token()
         return {"Authorization": f"Bearer {self._access_token}"} if self._access_token else {}
 
     def token_status(self):
-        now = time.time()
-        seconds_left = (self._token_expiry_ts - now) if self._token_expiry_ts else None
+        # Ensure we have a token (will attempt login if creds are available)
+        self._ensure_token()
         expires_at = (
             datetime.utcfromtimestamp(self._token_expiry_ts).isoformat() + "Z"
             if self._token_expiry_ts
@@ -105,11 +120,14 @@ class TDRESTClient:
             "has_token": bool(self._access_token),
             "source": self._token_source,
             "expires_at": expires_at,
-            "seconds_left": seconds_left,
             "last_refresh": last_refresh,
             "last_expiry_error": self.last_expiry_error,
             "last_chain_error": self.last_chain_error,
         }
+
+    @property
+    def token(self) -> str | None:
+        return self._access_token
 
     def _normalize_expiry(self, expiry: str) -> str:
         """
@@ -127,29 +145,35 @@ class TDRESTClient:
 
     def get_expiry_list(self, symbol: str):
         url = self.expiry_url
-        # Response defaults to CSV on history host; we also include token if required.
-        params = {"symbol": symbol, "response": "csv", "token": self.token}
+        # Response defaults to CSV on history host. Prefer Authorization header; fall back to token param only if no header.
+        headers = self._headers()
+        params = {"symbol": symbol, "response": "csv"}
+        if not headers.get("Authorization") and self.token:
+            params["token"] = self.token
         self.last_expiry_response = None
         self.last_expiry_error = None
 
         try:
-            resp = requests.get(url, headers=self._headers(), params=params, timeout=15)
+            resp = requests.get(url, headers=headers, params=params, timeout=15)
             self.last_expiry_response = resp.text
             resp.raise_for_status()
         except requests.HTTPError as e:
             resp_obj = resp if "resp" in locals() else None
-            if resp_obj is not None and resp_obj.status_code == 401:
+            # On 401, try to refresh token via credentials and retry once.
+            if resp_obj is not None and resp_obj.status_code == 401 and self.username and self.password:
                 self._fetch_token()
+                headers = self._headers()
+                if not headers.get("Authorization") and self.token:
+                    params["token"] = self.token
+                else:
+                    params.pop("token", None)
                 try:
-                    resp_retry = requests.get(url, headers=self._headers(), params=params, timeout=15)
+                    resp_retry = requests.get(url, headers=headers, params=params, timeout=15)
                     self.last_expiry_response = resp_retry.text
                     resp_retry.raise_for_status()
                     resp_obj = resp_retry
                 except Exception:
                     resp_obj = resp_retry if "resp_retry" in locals() else None
-            if resp_obj is not None and resp_obj.status_code == 401:
-                self.last_expiry_error = "Unauthorized (401) after token refresh"
-                return []
             body = resp_obj.text if resp_obj is not None else None
             self.last_expiry_error = f"HTTPError: {e} | body={body}"
             return []
@@ -189,29 +213,34 @@ class TDRESTClient:
     def get_option_chain_with_greeks(self, symbol: str, expiry: str, response: str = "pandas"):
         url = self.chain_url
         norm_expiry = self._normalize_expiry(expiry)
-        params = {"symbol": symbol, "expiry": norm_expiry, "response": "csv", "token": self.token}
+        headers = self._headers()
+        params = {"symbol": symbol, "expiry": norm_expiry, "response": "csv"}
+        if not headers.get("Authorization") and self.token:
+            params["token"] = self.token
         self.last_chain_response = None
         self.last_chain_error = None
 
         try:
-            resp = requests.get(url, headers=self._headers(), params=params, timeout=30)
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
             self.last_chain_response = resp.text
             resp.raise_for_status()
         except requests.HTTPError as e:
             resp_obj = resp if "resp" in locals() else None
-            if resp_obj is not None and resp_obj.status_code == 401:
-                # Try once with a fresh token
+            # On 401, try to refresh token via credentials and retry once.
+            if resp_obj is not None and resp_obj.status_code == 401 and self.username and self.password:
                 self._fetch_token()
+                headers = self._headers()
+                if not headers.get("Authorization") and self.token:
+                    params["token"] = self.token
+                else:
+                    params.pop("token", None)
                 try:
-                    resp_retry = requests.get(url, headers=self._headers(), params=params, timeout=30)
+                    resp_retry = requests.get(url, headers=headers, params=params, timeout=30)
                     self.last_chain_response = resp_retry.text
                     resp_retry.raise_for_status()
                     resp_obj = resp_retry
                 except Exception:
                     resp_obj = resp_retry if "resp_retry" in locals() else None
-            if resp_obj is not None and resp_obj.status_code == 401:
-                self.last_chain_error = "Unauthorized (401) after token refresh"
-                return pd.DataFrame()
             body = resp_obj.text if resp_obj is not None else None
             self.last_chain_error = f"HTTPError: {e} | body={body}"
             return pd.DataFrame()
