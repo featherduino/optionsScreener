@@ -3,7 +3,6 @@ import requests
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 
 API_BASE = os.getenv("OPTIONCHAIN_API", "http://localhost:8000")
@@ -154,10 +153,8 @@ def main():
     st.set_page_config(page_title="OptionChain Analytics", layout="wide")
     st.title("OptionChain Analytics")
 
-    col_a, col_b = st.columns([3, 1])
-    with col_b:
-        refresh_sec = st.slider("Auto-refresh (seconds)", 5, 60, 15, step=5)
-    st_autorefresh(interval=refresh_sec * 1000, key="auto_refresh_key", limit=None)
+    # Manual refresh button to avoid unnecessary polling
+    st.button("Refresh data")
 
     symbol = st.text_input("Symbol", value="RELIANCE").strip().upper()
     expiry_input = st.text_input("Expiry (optional, e.g., 30-12-2025)", value="").strip()

@@ -7,4 +7,3 @@ redis
 requests
 streamlit
 plotly
-streamlit-autorefresh
