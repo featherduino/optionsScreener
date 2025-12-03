@@ -5,6 +5,7 @@ import requests
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import streamlit.components.v1 as components
 
 API_BASE = os.getenv("OPTIONCHAIN_API", "http://localhost:8000")
 
@@ -57,8 +58,41 @@ def send_ga_event(event_name: str, params: dict | None = None):
         pass
 
 
+def inject_ga_tag():
+    measurement_id = os.getenv("GA_MEASUREMENT_ID")
+    if not measurement_id:
+        return
+
+    # Skip server-side page_view if we're loading the client tag.
+    st.session_state["ga_skip_page_event"] = True
+
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            if (window._ga_streamlit_loaded) return;
+            window._ga_streamlit_loaded = true;
+
+            const script = document.createElement('script');
+            script.async = true;
+            script.src = 'https://www.googletagmanager.com/gtag/js?id={measurement_id}';
+            script.onload = function() {{
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){{dataLayer.push(arguments);}}
+                window.gtag = gtag;
+                gtag('js', new Date());
+                gtag('config', '{measurement_id}');
+            }};
+            document.head.appendChild(script);
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def track_page_view():
-    if st.session_state.get("ga_page_tracked"):
+    if st.session_state.get("ga_page_tracked") or st.session_state.get("ga_skip_page_event"):
         return
     send_ga_event(
         "page_view",
@@ -213,6 +247,7 @@ def generate_signals(charts: dict):
 
 def main():
     st.set_page_config(page_title="OptionChain Analytics", layout="wide")
+    inject_ga_tag()
     track_page_view()
     st.title("OptionChain Analytics")
 
