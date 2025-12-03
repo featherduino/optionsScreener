@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-
+import streamlit.components.v1 as components
 
 API_BASE = os.getenv("OPTIONCHAIN_API", "http://localhost:8000")
 
@@ -21,7 +21,9 @@ def fetch_optionchain(symbol: str, expiry: str | None = None):
 def inject_ga():
     measurement_id = os.getenv("GA_MEASUREMENT_ID")
     if not measurement_id:
+        st.warning("GA_MEASUREMENT_ID not set in environment.")
         return
+
     ga_snippet = f"""
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id={measurement_id}"></script>
@@ -32,7 +34,7 @@ def inject_ga():
       gtag('config', '{measurement_id}');
     </script>
     """
-    st.markdown(ga_snippet, unsafe_allow_html=True)
+    components.html(ga_snippet, height=0)
 
 
 def compute_alerts(charts: dict):
