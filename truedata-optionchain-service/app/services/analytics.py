@@ -65,9 +65,16 @@ def build_chart_views(df: pd.DataFrame):
     put_oi_col = pick("putoi", "put_oi", "poi", "putopeninterest")
     call_iv_col = pick("calliv", "civ", "call_iv", "ivcall")
     put_iv_col = pick("putiv", "piv", "put_iv", "ivput")
+    call_ltp_col = pick("callltp", "call_ltp", "ltpcall", "ltpce")
+    put_ltp_col = pick("putltp", "put_ltp", "ltpput", "ltppe")
+    call_bid_col = pick("callbid", "bidcall", "call_bid", "bidce")
+    put_bid_col = pick("putbid", "bidput", "put_bid", "bidpe")
+    call_ask_col = pick("callask", "askcall", "call_ask", "askce", "calloffer")
+    put_ask_col = pick("putask", "askput", "put_ask", "askpe", "putoffer")
 
     charts = {"oi_bars": [], "iv_skew": [], "pcr_heatmap": []}
     charts["pcr_total"] = None
+    charts["prices"] = []
 
     # OI bars
     if strike_col and call_oi_col and put_oi_col:
@@ -94,6 +101,27 @@ def build_chart_views(df: pd.DataFrame):
         total_call = pcr_df[call_oi_col].sum(skipna=True)
         total_put = pcr_df[put_oi_col].sum(skipna=True)
         charts["pcr_total"] = (total_put / total_call) if total_call and total_call != 0 else None
+
+    # Prices (LTP and bid/ask)
+    price_cols = [c for c in [call_ltp_col, put_ltp_col, call_bid_col, put_bid_col, call_ask_col, put_ask_col] if c]
+    if strike_col and price_cols:
+        price_df = work[[strike_col] + price_cols].copy()
+        rename_map = {}
+        if call_ltp_col:
+            rename_map[call_ltp_col] = "callltp"
+        if put_ltp_col:
+            rename_map[put_ltp_col] = "putltp"
+        if call_bid_col:
+            rename_map[call_bid_col] = "callbid"
+        if put_bid_col:
+            rename_map[put_bid_col] = "putbid"
+        if call_ask_col:
+            rename_map[call_ask_col] = "callask"
+        if put_ask_col:
+            rename_map[put_ask_col] = "putask"
+        price_df = price_df.rename(columns=rename_map)
+        price_df = price_df.rename(columns={strike_col: "strike"})
+        charts["prices"] = _to_safe_records(price_df)
 
     return charts
 

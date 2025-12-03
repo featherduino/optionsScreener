@@ -261,6 +261,26 @@ def main():
     else:
         st.info("No OI data available.")
 
+    # LTP / Bid-Ask table
+    price_df = pd.DataFrame(charts.get("prices") or [])
+    if not price_df.empty:
+        price_df = price_df.sort_values("strike")
+        price_df = price_df.rename(
+            columns={
+                "callltp": "Call LTP",
+                "putltp": "Put LTP",
+                "callbid": "Call Bid",
+                "putbid": "Put Bid",
+                "callask": "Call Ask",
+                "putask": "Put Ask",
+                "strike": "Strike",
+            }
+        )
+        st.markdown("### LTP & Bid/Ask by Strike")
+        st.dataframe(price_df, use_container_width=True)
+    else:
+        st.info("No LTP / bid-ask data available.")
+
     # IV Skew
     iv_df = pd.DataFrame(charts.get("iv_skew") or [])
     if not iv_df.empty:
