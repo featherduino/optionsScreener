@@ -1,9 +1,9 @@
 import os
+import uuid
 import requests
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-import streamlit.components.v1 as components
 
 API_BASE = os.getenv("OPTIONCHAIN_API", "http://localhost:8000")
 
@@ -18,43 +18,48 @@ def fetch_optionchain(symbol: str, expiry: str | None = None):
     return resp.json()
 
 
-def inject_ga():
-    """Inject Google Analytics dynamically into Streamlit app using env variable GA_MEASUREMENT_ID."""
+def send_ga_event(event_name: str, params: dict | None = None):
+    """Send GA4 events via Measurement Protocol to avoid client-side script injection."""
     measurement_id = os.getenv("GA_MEASUREMENT_ID")
-
-    if not measurement_id:
-        st.warning("⚠️ GA_MEASUREMENT_ID not set in environment variables.")
+    api_secret = os.getenv("GA_API_SECRET")
+    if not measurement_id or not api_secret:
         return
 
-    components.html(
-        f"""
-        <script>
-        (function() {{
-            if (window._ga_injected) return;
-            window._ga_injected = true;
+    if "ga_client_id" not in st.session_state:
+        st.session_state["ga_client_id"] = str(uuid.uuid4())
 
-            const s = document.createElement('script');
-            s.async = true;
-            s.src = 'https://www.googletagmanager.com/gtag/js?id={measurement_id}';
-            s.onload = function() {{
-                window.dataLayer = window.dataLayer || [];
-                function gtag(){{dataLayer.push(arguments);}}
-                window.gtag = gtag;
-                gtag('js', new Date());
-                gtag('config', '{measurement_id}');
-                gtag('event', 'page_view', {{
-                    page_title: document.title,
-                    page_location: window.location.href
-                }});
-                console.log('✅ Google Analytics loaded (ID: {measurement_id})');
-            }};
-            document.head.appendChild(s);
-        }})();
-        </script>
-        """,
-        height=0,
+    payload = {
+        "client_id": st.session_state["ga_client_id"],
+        "events": [
+            {
+                "name": event_name,
+                "params": params or {},
+            }
+        ],
+    }
+    try:
+        resp = requests.post(
+            "https://www.google-analytics.com/mp/collect",
+            params={"measurement_id": measurement_id, "api_secret": api_secret},
+            json=payload,
+            timeout=5,
+        )
+        resp.raise_for_status()
+    except requests.RequestException:
+        # Analytics failures shouldn't break the dashboard.
+        pass
+
+
+def track_page_view():
+    if st.session_state.get("ga_page_tracked"):
+        return
+    send_ga_event(
+        "page_view",
+        {
+            "page_title": "OptionChain Analytics",
+        },
     )
-
+    st.session_state["ga_page_tracked"] = True
 
 
 def compute_alerts(charts: dict):
@@ -201,7 +206,7 @@ def generate_signals(charts: dict):
 
 def main():
     st.set_page_config(page_title="OptionChain Analytics", layout="wide")
-    inject_ga()
+    track_page_view()
     st.title("OptionChain Analytics")
 
     # Manual refresh button to avoid unnecessary polling
