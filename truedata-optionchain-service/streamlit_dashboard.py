@@ -210,20 +210,54 @@ def main():
     st.title("OptionChain Analytics")
 
     # Manual refresh button to avoid unnecessary polling
-    st.button("Refresh data")
+    if st.button("Refresh data"):
+        send_ga_event("refresh_click")
 
+    prev_symbol = st.session_state.get("last_symbol")
     symbol = st.text_input("Symbol", value="RELIANCE").strip().upper()
+    if symbol and symbol != prev_symbol:
+        send_ga_event("symbol_change", {"symbol": symbol})
+        st.session_state["last_symbol"] = symbol
+
+    prev_expiry = st.session_state.get("last_expiry_input")
     expiry_input = st.text_input("Expiry (optional, e.g., 30-12-2025)", value="").strip()
+    if expiry_input != prev_expiry:
+        send_ga_event("expiry_change", {"expiry": expiry_input or ""})
+        st.session_state["last_expiry_input"] = expiry_input
     if not symbol:
         st.stop()
 
     try:
         data = fetch_optionchain(symbol, expiry_input or None)
+        send_ga_event(
+            "fetch_success",
+            {
+                "symbol": symbol,
+                "expiry_input": expiry_input or "",
+            },
+        )
     except Exception as e:
+        err_msg = str(e)
+        send_ga_event(
+            "fetch_error",
+            {
+                "symbol": symbol,
+                "expiry_input": expiry_input or "",
+                "message": err_msg[:80],
+            },
+        )
         st.error(f"Failed to fetch data: {e}")
         st.stop()
 
     if data.get("error"):
+        send_ga_event(
+            "backend_error",
+            {
+                "symbol": symbol,
+                "expiry_used": data.get("requested_expiry") or data.get("expiry") or "",
+                "message": str(data.get("error"))[:80],
+            },
+        )
         st.error(f"Backend error: {data.get('error')}")
         hints = []
         if data.get("expiry_error"):
@@ -241,6 +275,13 @@ def main():
         st.stop()
 
     if data.get("total_rows", 0) == 0:
+        send_ga_event(
+            "empty_optionchain",
+            {
+                "symbol": symbol,
+                "expiry_used": data.get("expiry") or "",
+            },
+        )
         st.warning("No option chain rows returned. Check that your TrueData credentials are valid and the symbol has an active expiry.")
         st.info(f"Expiry used: {data.get('expiry')}")
         err = data.get("chain_error")
@@ -261,14 +302,19 @@ def main():
     if alerts:
         for a in alerts:
             st.warning(a)
+        send_ga_event("alerts_triggered", {"count": len(alerts)})
+    else:
+        send_ga_event("alerts_clear")
 
     st.markdown("### Signals")
     sigs = generate_signals(charts)
     if sigs:
         for s in sigs:
             st.info(s)
+        send_ga_event("signals_generated", {"count": len(sigs)})
     else:
         st.info("No signals available.")
+        send_ga_event("signals_missing")
 
     # Open Interest Bars
     oi_df = pd.DataFrame(charts.get("oi_bars") or [])
@@ -345,8 +391,10 @@ def main():
     idea = generate_trade_idea(charts)
     if idea:
         st.success(idea)
+        send_ga_event("idea_generated")
     else:
         st.info("Insufficient data to suggest an idea.")
+        send_ga_event("idea_missing")
 
     st.markdown("### Historical OI Trends")
     hist = data.get("history") or []
