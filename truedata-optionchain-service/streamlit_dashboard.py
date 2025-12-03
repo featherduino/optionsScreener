@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 import requests
 import pandas as pd
@@ -28,12 +29,18 @@ def send_ga_event(event_name: str, params: dict | None = None):
     if "ga_client_id" not in st.session_state:
         st.session_state["ga_client_id"] = str(uuid.uuid4())
 
+    params_with_session = dict(params or {})
+    if "ga_session_id" not in st.session_state:
+        st.session_state["ga_session_id"] = int(time.time())
+    params_with_session.setdefault("session_id", str(st.session_state["ga_session_id"]))
+    params_with_session.setdefault("engagement_time_msec", 1)
+
     payload = {
         "client_id": st.session_state["ga_client_id"],
         "events": [
             {
                 "name": event_name,
-                "params": params or {},
+                "params": params_with_session,
             }
         ],
     }
