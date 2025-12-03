@@ -67,6 +67,7 @@ def build_chart_views(df: pd.DataFrame):
     put_iv_col = pick("putiv", "piv", "put_iv", "ivput")
 
     charts = {"oi_bars": [], "iv_skew": [], "pcr_heatmap": []}
+    charts["pcr_total"] = None
 
     # OI bars
     if strike_col and call_oi_col and put_oi_col:
@@ -80,14 +81,19 @@ def build_chart_views(df: pd.DataFrame):
         iv.columns = ["strike", "calliv", "putiv"]
         charts["iv_skew"] = _to_safe_records(iv)
 
-    # PCR heatmap
+    # PCR heatmap: per-strike put OI / call OI, safe division
     if strike_col and call_oi_col and put_oi_col:
         pcr_df = work[[strike_col, call_oi_col, put_oi_col]].copy()
         pcr_df[call_oi_col] = pd.to_numeric(pcr_df[call_oi_col], errors="coerce")
         pcr_df[put_oi_col] = pd.to_numeric(pcr_df[put_oi_col], errors="coerce")
-        pcr_df["pcr"] = pcr_df[put_oi_col] / pcr_df[call_oi_col]
+        with pd.option_context("mode.use_inf_as_na", True):
+            pcr_df["pcr"] = pcr_df[put_oi_col] / pcr_df[call_oi_col]
         pcr_df.columns = ["strike", call_oi_col, put_oi_col, "pcr"]
         charts["pcr_heatmap"] = _to_safe_records(pcr_df[["strike", "pcr"]])
+        # Aggregate PCR = total_put_oi / total_call_oi
+        total_call = pcr_df[call_oi_col].sum(skipna=True)
+        total_put = pcr_df[put_oi_col].sum(skipna=True)
+        charts["pcr_total"] = (total_put / total_call) if total_call and total_call != 0 else None
 
     return charts
 

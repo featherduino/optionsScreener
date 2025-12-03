@@ -18,14 +18,41 @@ def fetch_optionchain(symbol: str, expiry: str | None = None):
     return resp.json()
 
 
+def inject_ga():
+    measurement_id = os.getenv("GA_MEASUREMENT_ID")
+    if not measurement_id:
+        return
+    st.markdown(
+        f"""
+        <!-- Google Analytics -->
+        <script async src="https://www.googletagmanager.com/gtag/js?id={measurement_id}"></script>
+        <script>
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){{dataLayer.push(arguments);}}
+          gtag('js', new Date());
+          gtag('config', '{measurement_id}');
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def compute_alerts(charts: dict):
     alerts = []
+    # Prefer aggregate PCR (total put OI / total call OI), fallback to mean of per-strike PCRs.
+    aggregate_pcr = charts.get("pcr_total")
     # PCR shift alert
     pcr_df = pd.DataFrame(charts.get("pcr_heatmap") or [])
-    if not pcr_df.empty and "pcr" in pcr_df.columns:
+    if aggregate_pcr is not None:
+        curr_mean = pd.to_numeric(pd.Series([aggregate_pcr]), errors="coerce").mean()
+    elif not pcr_df.empty and "pcr" in pcr_df.columns:
         curr_mean = pd.to_numeric(pcr_df["pcr"], errors="coerce").mean()
+    else:
+        curr_mean = None
+
+    if curr_mean is not None and pd.notnull(curr_mean):
         prev_mean = st.session_state.get("prev_pcr_mean")
-        if prev_mean is not None and pd.notnull(curr_mean):
+        if prev_mean is not None and pd.notnull(prev_mean):
             delta = curr_mean - prev_mean
             if abs(delta) > 0.2:
                 alerts.append(f"PCR shifted by {delta:+.2f} (prev {prev_mean:.2f} → now {curr_mean:.2f})")
@@ -128,15 +155,18 @@ def generate_signals(charts: dict):
             signals.append(f"Max Put OI (support): {', '.join(top_puts['strike'].astype(str).tolist())}")
 
     pcr_mean = None
-    if not pcr_df.empty and "pcr" in pcr_df.columns:
+    aggregate_pcr = charts.get("pcr_total")
+    if aggregate_pcr is not None:
+        pcr_mean = pd.to_numeric(pd.Series([aggregate_pcr]), errors="coerce").mean()
+    elif not pcr_df.empty and "pcr" in pcr_df.columns:
         pcr_mean = pd.to_numeric(pcr_df["pcr"], errors="coerce").mean()
-        if pd.notnull(pcr_mean):
-            bias = "neutral"
-            if pcr_mean > 1.1:
-                bias = "bullish"
-            elif pcr_mean < 0.9:
-                bias = "bearish"
-            signals.append(f"PCR ≈ {pcr_mean:.2f} ({bias})")
+    if pcr_mean is not None and pd.notnull(pcr_mean):
+        bias = "neutral"
+        if pcr_mean > 1.1:
+            bias = "bullish"
+        elif pcr_mean < 0.9:
+            bias = "bearish"
+        signals.append(f"PCR ≈ {pcr_mean:.2f} ({bias})")
 
     iv_mean = None
     if not iv_df.empty:
@@ -151,6 +181,7 @@ def generate_signals(charts: dict):
 
 def main():
     st.set_page_config(page_title="OptionChain Analytics", layout="wide")
+    inject_ga()
     st.title("OptionChain Analytics")
 
     # Manual refresh button to avoid unnecessary polling
@@ -261,6 +292,9 @@ def main():
         st.plotly_chart(fig_pcr, use_container_width=True)
     else:
         st.info("No PCR data available.")
+
+    if charts.get("pcr_total") is not None:
+        st.markdown(f"**Aggregate PCR (total put OI / total call OI):** {charts['pcr_total']:.2f}")
 
     st.markdown("### Quick Idea (heuristic)")
     idea = generate_trade_idea(charts)
