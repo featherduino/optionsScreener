@@ -19,22 +19,42 @@ def fetch_optionchain(symbol: str, expiry: str | None = None):
 
 
 def inject_ga():
+    """Inject Google Analytics dynamically into Streamlit app using env variable GA_MEASUREMENT_ID."""
     measurement_id = os.getenv("GA_MEASUREMENT_ID")
+
     if not measurement_id:
-        st.warning("GA_MEASUREMENT_ID not set in environment.")
+        st.warning("⚠️ GA_MEASUREMENT_ID not set in environment variables.")
         return
 
-    ga_snippet = f"""
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id={measurement_id}"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){{dataLayer.push(arguments);}}
-      gtag('js', new Date());
-      gtag('config', '{measurement_id}');
-    </script>
-    """
-    components.html(ga_snippet, height=0)
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            if (window._ga_injected) return;
+            window._ga_injected = true;
+
+            const s = document.createElement('script');
+            s.async = true;
+            s.src = 'https://www.googletagmanager.com/gtag/js?id={measurement_id}';
+            s.onload = function() {{
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){{dataLayer.push(arguments);}}
+                window.gtag = gtag;
+                gtag('js', new Date());
+                gtag('config', '{measurement_id}');
+                gtag('event', 'page_view', {{
+                    page_title: document.title,
+                    page_location: window.location.href
+                }});
+                console.log('✅ Google Analytics loaded (ID: {measurement_id})');
+            }};
+            document.head.appendChild(s);
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
 
 
 def compute_alerts(charts: dict):
