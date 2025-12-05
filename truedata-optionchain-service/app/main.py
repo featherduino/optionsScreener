@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from app.config import ALLOW_ORIGINS
 from app.routers.optionchain import router as optionchain_router
+from app.routers.optionscreener import router as optionscreener_router
 from app.routers.health import router as health_router
 
 app = FastAPI(
@@ -19,6 +20,7 @@ app.add_middleware(
 )
 
 app.include_router(optionchain_router)
+app.include_router(optionscreener_router)
 app.include_router(health_router)
 
 @app.get("/", response_class=HTMLResponse)
@@ -42,6 +44,7 @@ def index():
       <h2>Endpoints</h2>
       <ul>
         <li><code>GET /api/optionchain/{symbol}</code> – nearest expiry option chain + charts</li>
+        <li><code>GET /api/optionscreener/*</code> – proxy to the Option Screener service (overview, heatmap, quotes, charts)</li>
         <li><code>GET /api/health</code> – liveness</li>
         <li><code>GET /api/health/auth</code> – token status (no token exposed)</li>
         <li><a href="/api/docs">Swagger UI</a> | <a href="/api/openapi.json">OpenAPI JSON</a></li>
