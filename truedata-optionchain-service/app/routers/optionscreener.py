@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import base64
 import io
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from app.services.charts import (
     render_heatmap_chart,
     render_rsi_trend_chart,
     render_top_movers_chart,
 )
+from app.services.drive import DriveConfigurationError, DriveUploadError, upload_png
 from app.services.optionscreener import (
     ScreenerConfigurationError,
     ScreenerServiceError,
@@ -53,23 +55,42 @@ def quote(symbol: str | None = None):
 
 
 @router.get("/charts/heatmap")
-def heatmap_chart(date: str | None = None):
+def heatmap_chart(date: str | None = None, format: str = "png", upload: str | None = None):
     data = _fetch_json("/heatmap", {"date": date})
     payload = render_heatmap_chart(data or [])
-    return StreamingResponse(io.BytesIO(payload), media_type="image/png")
+    return _chart_response("heatmap", payload, format, upload)
 
 
 @router.get("/charts/top-movers")
-def top_movers_chart(date: str | None = None):
+def top_movers_chart(date: str | None = None, format: str = "png", upload: str | None = None):
     data = _fetch_json("/top-symbols", {"date": date})
     payload = render_top_movers_chart(data or [])
-    return StreamingResponse(io.BytesIO(payload), media_type="image/png")
+    return _chart_response("top-movers", payload, format, upload)
 
 
 @router.get("/charts/rsi-trend")
-def rsi_trend_chart(date: str | None = None):
+def rsi_trend_chart(date: str | None = None, format: str = "png", upload: str | None = None):
     data = _fetch_json("/heatmap", {"date": date})
     payload = render_rsi_trend_chart(data or [])
+    return _chart_response("rsi-trend", payload, format, upload)
+
+
+def _chart_response(kind: str, payload: bytes, format: str, upload: str | None):
+    if upload == "drive":
+        filename = f"{kind}.png"
+        try:
+            result = upload_png(filename, payload)
+            return JSONResponse(result)
+        except DriveConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except DriveUploadError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    if format == "html":
+        encoded = base64.b64encode(payload).decode("ascii")
+        html = f"<img alt='{kind}' src='data:image/png;base64,{encoded}' />"
+        return HTMLResponse(content=html)
+
     return StreamingResponse(io.BytesIO(payload), media_type="image/png")
 
 
