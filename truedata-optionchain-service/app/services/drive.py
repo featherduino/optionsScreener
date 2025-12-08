@@ -1,75 +1,86 @@
-"""Google Drive upload helper for chart endpoints."""
+"""S3 uploader used by the chart endpoints when `upload=drive` is requested."""
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaInMemoryUpload
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-_drive_service = None
+_s3_client = None
 
 
 class DriveConfigurationError(RuntimeError):
-    """Raised when Google Drive configuration variables are missing or invalid."""
+    """Raised when the S3 upload integration is not configured properly."""
 
 
 class DriveUploadError(RuntimeError):
-    """Raised when an upload to Google Drive fails."""
+    """Raised when uploading to S3 fails."""
 
 
-def _load_service_account_info() -> dict[str, Any]:
-    raw = os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
-    if not raw:
-        raise DriveConfigurationError("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON is not configured")
+def _get_s3_client():
+    global _s3_client
+    if _s3_client is not None:
+        return _s3_client
+
+    access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    region = os.getenv("AWS_REGION", "us-east-1")
+    endpoint_url = os.getenv("AWS_S3_ENDPOINT_URL")
+
+    if not access_key or not secret_key:
+        raise DriveConfigurationError("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required")
+
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise DriveConfigurationError("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON is not valid JSON") from exc
+        session = boto3.session.Session(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region,
+        )
+        _s3_client = session.client("s3", endpoint_url=endpoint_url)
+        return _s3_client
+    except (BotoCoreError, ClientError) as exc:  # pragma: no cover - boto client errors
+        raise DriveConfigurationError(f"Failed to initialize S3 client: {exc}") from exc
 
 
-def _get_drive_service():
-    global _drive_service
-    if _drive_service is not None:
-        return _drive_service
+def _build_key(filename: str) -> str:
+    prefix = os.getenv("S3_BUCKET_PREFIX", "charts")
+    prefix = prefix.strip("/")
+    if prefix:
+        return f"{prefix}/{filename}"
+    return filename
 
-    info = _load_service_account_info()
-    try:
-        creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
-        _drive_service = build("drive", "v3", credentials=creds)
-        return _drive_service
-    except Exception as exc:
-        raise DriveConfigurationError(f"Failed to initialize Google Drive client: {exc}") from exc
+
+def _public_url(bucket: str, key: str) -> str:
+    base = os.getenv("S3_PUBLIC_BASE_URL")
+    if base:
+        return f"{base.rstrip('/')}/{key}"
+    region = os.getenv("AWS_REGION", "us-east-1")
+    return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
 
 
 def upload_png(filename: str, payload: bytes) -> dict[str, Any]:
-    """Upload PNG bytes to the configured Drive folder."""
-    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
-    if not folder_id:
-        raise DriveConfigurationError("GOOGLE_DRIVE_FOLDER_ID is not configured")
+    """Upload PNG bytes to the configured S3 bucket."""
+    bucket = os.getenv("S3_BUCKET_NAME")
+    if not bucket:
+        raise DriveConfigurationError("S3_BUCKET_NAME is required for uploads")
 
-    service = _get_drive_service()
-    metadata = {
-        "name": filename,
-        "mimeType": "image/png",
-        "parents": [folder_id],
-    }
-    media = MediaInMemoryUpload(payload, mimetype="image/png", resumable=False)
+    key = _build_key(filename)
+    client = _get_s3_client()
+    extra = {"ContentType": "image/png"}
+    acl = os.getenv("S3_OBJECT_ACL", "public-read")
+    if acl:
+        extra["ACL"] = acl
+
     try:
-        result = (
-            service.files()
-            .create(body=metadata, media_body=media, fields="id, name, webViewLink, webContentLink")
-            .execute()
-        )
-        return {
-            "id": result.get("id"),
-            "name": result.get("name"),
-            "webViewLink": result.get("webViewLink"),
-            "webContentLink": result.get("webContentLink"),
-        }
-    except Exception as exc:
-        raise DriveUploadError(f"Drive upload failed: {exc}") from exc
+        client.put_object(Bucket=bucket, Key=key, Body=payload, **extra)
+    except (BotoCoreError, ClientError) as exc:  # pragma: no cover - AWS failures
+        raise DriveUploadError(f"S3 upload failed: {exc}") from exc
+
+    url = _public_url(bucket, key)
+    return {
+        "bucket": bucket,
+        "key": key,
+        "url": url,
+    }

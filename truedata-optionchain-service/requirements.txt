@@ -9,5 +9,4 @@ streamlit
 plotly
 matplotlib
 seaborn
-google-api-python-client
-google-auth
+boto3
