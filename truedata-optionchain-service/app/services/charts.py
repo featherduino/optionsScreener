@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 import pandas as pd
 import seaborn as sns
+from PIL import Image
 
 
 def _finalize(fig) -> bytes:
@@ -20,7 +21,22 @@ def _finalize(fig) -> bytes:
     fig.savefig(buf, format="png", dpi=160)
     plt.close(fig)
     buf.seek(0)
-    return buf.read()
+    raw = buf.read()
+
+    # Ensure Instagram-friendly aspect ratio by centering chart on 1080x1350 canvas.
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        canvas_size = (1080, 1350)  # 4:5 aspect ratio
+        img.thumbnail(canvas_size, Image.LANCZOS)
+        canvas = Image.new("RGB", canvas_size, color="white")
+        offset = ((canvas_size[0] - img.width) // 2, (canvas_size[1] - img.height) // 2)
+        canvas.paste(img, offset)
+        out = io.BytesIO()
+        canvas.save(out, format="PNG")
+        out.seek(0)
+        return out.read()
+    except Exception:
+        return raw
 
 
 def render_heatmap_chart(rows):

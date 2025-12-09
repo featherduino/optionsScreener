@@ -10,3 +10,4 @@ plotly
 matplotlib
 seaborn
 boto3
+pillow
