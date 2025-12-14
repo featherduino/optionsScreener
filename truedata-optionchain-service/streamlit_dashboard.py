@@ -257,6 +257,7 @@ def main():
 
     prev_symbol = st.session_state.get("last_symbol")
     symbol = st.text_input("Symbol", value="RELIANCE").strip().upper()
+    st.caption("Use NSE option symbols (e.g., RELIANCE, NIFTY50, BANKNIFTY).")
     if symbol and symbol != prev_symbol:
         send_ga_event("symbol_change", {"symbol": symbol})
         st.session_state["last_symbol"] = symbol
