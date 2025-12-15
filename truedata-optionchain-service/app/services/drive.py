@@ -44,9 +44,10 @@ def _get_s3_client():
         raise DriveConfigurationError(f"Failed to initialize S3 client: {exc}") from exc
 
 
-def _build_key(filename: str) -> str:
-    prefix = os.getenv("S3_BUCKET_PREFIX", "charts")
-    prefix = prefix.strip("/")
+def _build_key(filename: str, *, prefix: str | None = None, default_prefix: str = "charts") -> str:
+    if prefix is None:
+        prefix = os.getenv("S3_BUCKET_PREFIX", default_prefix)
+    prefix = (prefix or "").strip("/")
     if prefix:
         return f"{prefix}/{filename}"
     return filename
@@ -60,15 +61,22 @@ def _public_url(bucket: str, key: str) -> str:
     return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
 
 
-def upload_png(filename: str, payload: bytes) -> dict[str, Any]:
-    """Upload PNG bytes to the configured S3 bucket."""
+def _upload_payload(
+    filename: str,
+    payload: bytes,
+    *,
+    content_type: str,
+    key_prefix: str | None = None,
+    default_prefix: str = "charts",
+) -> dict[str, Any]:
+    """Internal helper to upload a payload to S3 with consistent defaults."""
     bucket = os.getenv("S3_BUCKET_NAME")
     if not bucket:
         raise DriveConfigurationError("S3_BUCKET_NAME is required for uploads")
 
-    key = _build_key(filename)
+    key = _build_key(filename, prefix=key_prefix, default_prefix=default_prefix)
     client = _get_s3_client()
-    extra = {"ContentType": "image/png"}
+    extra = {"ContentType": content_type}
     acl = os.getenv("S3_OBJECT_ACL", "public-read")
     if acl:
         extra["ACL"] = acl
@@ -84,3 +92,20 @@ def upload_png(filename: str, payload: bytes) -> dict[str, Any]:
         "key": key,
         "url": url,
     }
+
+
+def upload_png(filename: str, payload: bytes) -> dict[str, Any]:
+    """Upload PNG bytes to the configured S3 bucket."""
+    return _upload_payload(filename, payload, content_type="image/png")
+
+
+def upload_mp4(filename: str, payload: bytes) -> dict[str, Any]:
+    """Upload MP4 bytes with an optional video-specific prefix."""
+    video_prefix = os.getenv("S3_VIDEO_PREFIX")
+    return _upload_payload(
+        filename,
+        payload,
+        content_type="video/mp4",
+        key_prefix=video_prefix,
+        default_prefix="videos",
+    )

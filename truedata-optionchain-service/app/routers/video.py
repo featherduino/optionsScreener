@@ -8,6 +8,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.services.drive import (
+    DriveConfigurationError,
+    DriveUploadError,
+    upload_mp4,
+)
 from app.services.video import VideoGenerationError, build_video_from_base64_images
 
 
@@ -35,7 +40,14 @@ def create_video(req: VideoRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    video_b64 = base64.b64encode(video_bytes).decode("ascii")
+    filename = "market_analysis.mp4"
+    try:
+        upload_result = upload_mp4(filename, video_bytes)
+    except DriveConfigurationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except DriveUploadError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     payload = {
         "success": True,
         "frame_count": meta["frame_count"],
@@ -43,9 +55,11 @@ def create_video(req: VideoRequest):
         "width": meta["width"],
         "height": meta["height"],
         "video": {
-            "base64": video_b64,
+            "url": upload_result["url"],
             "mime_type": "video/mp4",
-            "filename": "market_analysis.mp4",
+            "filename": filename,
+            "bucket": upload_result["bucket"],
+            "key": upload_result["key"],
         },
     }
     return JSONResponse(payload)
