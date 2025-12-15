@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -21,8 +19,8 @@ router = APIRouter(prefix="/media", tags=["media"])
 
 class VideoRequest(BaseModel):
     frames: list[Any] = Field(..., description="Base64 images or objects with data/base64 fields.")
-    width: int = Field(1920, ge=16, le=3840)
-    height: int = Field(1080, ge=16, le=2160)
+    width: int = Field(1080, ge=16, le=3840)
+    height: int = Field(1920, ge=16, le=2160)
     seconds_per_frame: float = Field(3.0, gt=0)
 
 

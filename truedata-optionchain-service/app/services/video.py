@@ -62,10 +62,33 @@ def _decode_image(frame: Any, idx: int) -> Image.Image:
     return Image.open(io.BytesIO(raw))
 
 
+def _compose_canvas(image: Image.Image, width: int, height: int) -> Image.Image:
+    """Resize the image to fit target dimensions while preserving aspect ratio."""
+    src_w, src_h = image.size
+    if src_w == 0 or src_h == 0:
+        raise ValueError("Frame has invalid dimensions")
+
+    target_ratio = width / height
+    source_ratio = src_w / src_h
+    if source_ratio > target_ratio:
+        # Fit by width, adjust height.
+        new_width = width
+        new_height = int(round(width / source_ratio))
+    else:
+        new_height = height
+        new_width = int(round(height * source_ratio))
+
+    resized = image.resize((max(new_width, 1), max(new_height, 1)), Image.LANCZOS)
+    canvas = Image.new("RGB", (width, height), "black")
+    offset = ((width - resized.width) // 2, (height - resized.height) // 2)
+    canvas.paste(resized, offset)
+    return canvas
+
+
 def build_video_from_base64_images(
     frames: Iterable[Any],
-    width: int = 1920,
-    height: int = 1080,
+    width: int = 1080,
+    height: int = 1920,
     seconds_per_frame: float = 3.0,
 ) -> tuple[bytes, dict]:
     """
@@ -83,12 +106,10 @@ def build_video_from_base64_images(
     temp_dir = _ensure_dir()
     video_path = os.path.join(temp_dir, "output.mp4")
     try:
-        # Normalize each frame to requested resolution.
+        # Normalize each frame to requested resolution with Instagram-friendly letterboxing.
         for idx, frame in enumerate(items):
             image = _decode_image(frame, idx).convert("RGB")
-            canvas = Image.new("RGB", (width, height), "black")
-            resized = image.resize((width, height), Image.LANCZOS)
-            canvas.paste(resized, (0, 0))
+            canvas = _compose_canvas(image, width, height)
             frame_path = os.path.join(temp_dir, f"frame_{idx:04d}.png")
             canvas.save(frame_path, format="PNG")
 
