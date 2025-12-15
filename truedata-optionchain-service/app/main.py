@@ -5,6 +5,7 @@ from app.config import ALLOW_ORIGINS
 from app.routers.optionchain import router as optionchain_router
 from app.routers.optionscreener import router as optionscreener_router
 from app.routers.health import router as health_router
+from app.routers.video import router as media_router
 
 app = FastAPI(
     title="TrueData OptionChain + Greeks API",
@@ -22,6 +23,7 @@ app.add_middleware(
 app.include_router(optionchain_router)
 app.include_router(optionscreener_router)
 app.include_router(health_router)
+app.include_router(media_router)
 
 @app.get("/", response_class=HTMLResponse)
 def index():

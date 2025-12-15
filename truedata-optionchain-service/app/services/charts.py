@@ -27,6 +27,7 @@ def _finalize(fig) -> bytes:
     try:
         img = Image.open(io.BytesIO(raw)).convert("RGB")
         canvas_size = (1080, 1350)  # 4:5 aspect ratio
+        img.preview_size = canvas_size
         img.thumbnail(canvas_size, Image.LANCZOS)
         canvas = Image.new("RGB", canvas_size, color="white")
         offset = ((canvas_size[0] - img.width) // 2, (canvas_size[1] - img.height) // 2)
