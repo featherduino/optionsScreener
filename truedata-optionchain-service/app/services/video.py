@@ -22,6 +22,10 @@ class AudioMergeError(RuntimeError):
     """Raised when ffmpeg fails to merge audio and video."""
 
 
+class SpeechSynthesisError(RuntimeError):
+    """Raised when text-to-speech synthesis fails."""
+
+
 def _ensure_dir() -> str:
     return tempfile.mkdtemp(prefix="video-gen-")
 
@@ -186,6 +190,32 @@ def merge_video_audio(video_bytes: bytes, audio_bytes: bytes) -> bytes:
         except (OSError, subprocess.CalledProcessError) as exc:
             raise AudioMergeError(getattr(exc, "stderr", b"").decode() or str(exc)) from exc
 
+        with open(output_path, "rb") as fh:
+            return fh.read()
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def synthesize_speech(text: str, *, voice: str | None = None, rate: int | None = None) -> bytes:
+    """Generate audio bytes from the provided caption text using espeak."""
+    if not text or not text.strip():
+        raise ValueError("caption text must be non-empty")
+
+    temp_dir = _ensure_dir()
+    output_path = os.path.join(temp_dir, "speech.wav")
+    cmd = ["espeak", "-w", output_path]
+    if voice:
+        cmd.extend(["-v", voice])
+    if rate:
+        cmd.extend(["-s", str(rate)])
+    cmd.append(text.strip())
+
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SpeechSynthesisError(getattr(exc, "stderr", b"").decode() or str(exc)) from exc
+
+    try:
         with open(output_path, "rb") as fh:
             return fh.read()
     finally:

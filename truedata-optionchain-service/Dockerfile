@@ -12,6 +12,7 @@ RUN apt-get update && \
       gcc \
       libssl-dev \
       libffi-dev \
+      espeak \
       ffmpeg \
       && rm -rf /var/lib/apt/lists/*
 

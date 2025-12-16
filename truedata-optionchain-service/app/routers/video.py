@@ -15,9 +15,11 @@ from app.services.drive import (
 )
 from app.services.video import (
     AudioMergeError,
+    SpeechSynthesisError,
     VideoGenerationError,
     build_video_from_base64_images,
     merge_video_audio,
+    synthesize_speech,
 )
 
 
@@ -32,6 +34,20 @@ class VideoRequest(BaseModel):
     audio_base64: str | None = Field(
         None,
         description="Optional base64-encoded audio to merge into the video.",
+    )
+    caption_text: str | None = Field(
+        None,
+        description="Optional caption text to synthesize into audio when audio_base64 is not provided.",
+    )
+    tts_voice: str | None = Field(
+        None,
+        description="Optional voice identifier for text-to-speech (espeak voices).",
+    )
+    tts_rate: int | None = Field(
+        None,
+        ge=80,
+        le=450,
+        description="Optional speech rate (words per minute) for synthesized audio.",
     )
 
 
@@ -49,6 +65,7 @@ def create_video(req: VideoRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    audio_bytes: bytes | None = None
     if req.audio_base64:
         raw_audio = req.audio_base64.strip()
         if "," in raw_audio and raw_audio.split(",", 1)[0].startswith("data:"):
@@ -62,6 +79,19 @@ def create_video(req: VideoRequest):
         except binascii.Error as exc:
             raise HTTPException(status_code=400, detail=f"Invalid audio base64: {exc}") from exc
 
+    elif req.caption_text:
+        try:
+            audio_bytes = synthesize_speech(
+                req.caption_text,
+                voice=req.tts_voice,
+                rate=req.tts_rate,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except SpeechSynthesisError as exc:
+            raise HTTPException(status_code=500, detail=f"TTS failed: {exc}") from exc
+
+    if audio_bytes:
         try:
             video_bytes = merge_video_audio(video_bytes, audio_bytes)
         except AudioMergeError as exc:
