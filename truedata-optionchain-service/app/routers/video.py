@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -11,7 +13,12 @@ from app.services.drive import (
     DriveUploadError,
     upload_mp4,
 )
-from app.services.video import VideoGenerationError, build_video_from_base64_images
+from app.services.video import (
+    AudioMergeError,
+    VideoGenerationError,
+    build_video_from_base64_images,
+    merge_video_audio,
+)
 
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -22,6 +29,10 @@ class VideoRequest(BaseModel):
     width: int = Field(1080, ge=16, le=3840)
     height: int = Field(1920, ge=16, le=2160)
     seconds_per_frame: float = Field(3.0, gt=0)
+    audio_base64: str | None = Field(
+        None,
+        description="Optional base64-encoded audio to merge into the video.",
+    )
 
 
 @router.post("/video-from-images")
@@ -37,6 +48,24 @@ def create_video(req: VideoRequest):
         raise HTTPException(status_code=500, detail=f"Video generation failed: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if req.audio_base64:
+        raw_audio = req.audio_base64.strip()
+        if "," in raw_audio and raw_audio.split(",", 1)[0].startswith("data:"):
+            raw_audio = raw_audio.split(",", 1)[1]
+        padding = len(raw_audio) % 4
+        if padding:
+            raw_audio += "=" * (4 - padding)
+        cleaned_audio = "".join(raw_audio.split())
+        try:
+            audio_bytes = base64.b64decode(cleaned_audio, validate=False)
+        except binascii.Error as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid audio base64: {exc}") from exc
+
+        try:
+            video_bytes = merge_video_audio(video_bytes, audio_bytes)
+        except AudioMergeError as exc:
+            raise HTTPException(status_code=500, detail=f"Audio merge failed: {exc}") from exc
 
     filename = "market_analysis.mp4"
     try:

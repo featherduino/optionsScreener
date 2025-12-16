@@ -18,6 +18,10 @@ class VideoGenerationError(RuntimeError):
     """Raised when ffmpeg fails to compose the frames."""
 
 
+class AudioMergeError(RuntimeError):
+    """Raised when ffmpeg fails to merge audio and video."""
+
+
 def _ensure_dir() -> str:
     return tempfile.mkdtemp(prefix="video-gen-")
 
@@ -145,5 +149,44 @@ def build_video_from_base64_images(
             "height": height,
         }
         return payload, metadata
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def merge_video_audio(video_bytes: bytes, audio_bytes: bytes) -> bytes:
+    """Merge audio bytes with the provided MP4 video, returning the new MP4."""
+    temp_dir = _ensure_dir()
+    video_path = os.path.join(temp_dir, "video.mp4")
+    audio_path = os.path.join(temp_dir, "audio_input")
+    output_path = os.path.join(temp_dir, "output.mp4")
+    try:
+        with open(video_path, "wb") as fh:
+            fh.write(video_bytes)
+        with open(audio_path, "wb") as fh:
+            fh.write(audio_bytes)
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            video_path,
+            "-i",
+            audio_path,
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            output_path,
+        ]
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise AudioMergeError(getattr(exc, "stderr", b"").decode() or str(exc)) from exc
+
+        with open(output_path, "rb") as fh:
+            return fh.read()
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
