@@ -91,6 +91,39 @@ def inject_ga_tag():
     )
 
 
+def inject_gtm_snippet():
+    container_id = os.getenv("GTM_CONTAINER_ID") or os.getenv("GTM_CONTAINER", "").strip()
+    if not container_id or st.session_state.get("gtm_injected"):
+        return
+
+    st.session_state["gtm_injected"] = True
+
+    components.html(
+        f"""
+        <!-- Google Tag Manager -->
+        <script>
+        (function(w,d,s,l,i){{w[l]=w[l]||[];w[l].push({{'gtm.start':
+        new Date().getTime(),event:'gtm.js'}});var f=d.getElementsByTagName(s)[0],
+        j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+        'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+        }})(window,document,'script','dataLayer','{container_id}');
+        </script>
+        <!-- End Google Tag Manager -->
+        """,
+        height=0,
+    )
+
+    st.markdown(
+        f"""
+        <!-- Google Tag Manager (noscript) -->
+        <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={container_id}"
+        height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+        <!-- End Google Tag Manager (noscript) -->
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def track_page_view():
     if st.session_state.get("ga_page_tracked") or st.session_state.get("ga_skip_page_event"):
         return
@@ -247,6 +280,7 @@ def generate_signals(charts: dict):
 
 def main():
     st.set_page_config(page_title="OptionChain Analytics", layout="wide")
+    inject_gtm_snippet()
     inject_ga_tag()
     track_page_view()
     st.title("OptionChain Analytics")
